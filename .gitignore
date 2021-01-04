@@ -22,3 +22,8 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 gilded_rose-*.tar
 
+# Ignore compiled files
+*.beam
+
+# Ignore priv
+/priv/
