@@ -28,28 +28,28 @@ defmodule GildedRose do
 
   # Load data functionality.
   defp loadItem([]), do: []
-  defp loadItem(content) do
-    item_to_load = hd(content) |> String.split("\,")
+  defp loadItem([item|rest]) do
+    item_to_load = String.split(item,"\,")
     itemName = Enum.at(item_to_load, 0)
     {itemSellIn, _} = Integer.parse(Enum.at(item_to_load, 1))
     {itemQuality, _} = Integer.parse(Enum.at(item_to_load, 2))
-    List.flatten([Item.new(itemName, itemSellIn, itemQuality), loadItem(tl(content))])
+    List.flatten([Item.new(itemName, itemSellIn, itemQuality),loadItem(rest)])
   end
 
   defp loadCate([]), do: []
-  defp loadCate(content) do
-    item_to_load = hd(content) |> String.split("\,")
+  defp loadCate([item|rest]) do
+    item_to_load = String.split(item,"\,")
     itemName = Enum.at(item_to_load, 0)
     itemCate = Enum.at(item_to_load, 1)
-    List.flatten([Cate.new(itemName, itemCate), loadCate(tl(content))])
+    List.flatten([Cate.new(itemName, itemCate),loadCate(rest)])
   end
 
   defp loadDate([]), do: []
-  defp loadDate(content) do
-    item_to_load = hd(content) |> String.split("\,")
+  defp loadDate([item|rest]) do
+    item_to_load = String.split(item,"\,")
     itemName = Enum.at(item_to_load, 0)
     itemDate = Enum.at(item_to_load, 1)
-    List.flatten([Da.new(itemName, itemDate), loadDate(tl(content))])
+    List.flatten([Da.new(itemName, itemDate),loadDate(rest)])
   end
 
   # Get all items or get items from different map.
@@ -66,14 +66,13 @@ defmodule GildedRose do
 
   # Update the quality and invoke the sell_in date and the data writing function.
   def update_quality(agent) do
-    item_num = GildedRose.items(agent, :cate) |> length()
-
+    item_num = items(agent, :cate) |> length()
     sell_list = update(agent, :item)
-    Agent.update(agent, &Map.replace(&1, :item, sell_list))
+    :ok = Agent.update(agent, &Map.replace(&1, :item, sell_list))
     quality_list = update_quality(agent, item_num, [])
-    Agent.update(agent, &Map.replace(&1, :item, quality_list))
+    :ok = Agent.update(agent, &Map.replace(&1, :item, quality_list))
     date_list = update(agent, :date)
-    Agent.update(agent, &Map.replace(&1, :date, date_list))
+    :ok = Agent.update(agent, &Map.replace(&1, :date, date_list))
     :ok = writeData("priv/item.csv", agent)
   end
 
@@ -83,56 +82,55 @@ defmodule GildedRose do
     cate = items(agent, :cate) |> Enum.at(item_num - 1)
     item = items(agent, :item) |> Enum.find(& &1.name == cate.name)
     newItem = quality_change(item, String.to_atom(cate.category))
-    newList = List.flatten([list, newItem])
+    newList = Enum.concat(list, [newItem])
     update_quality(agent,item_num - 1,newList)
   end
 
   # Pattern match different items.
-  defp quality_change(item, :normal) do
-      if item.quality > 0 do
-        if item.sell_in < 0 do
-          %{item | quality: item.quality - 2}
-        else
-          %{item | quality: item.quality - 1}
-        end
-      else
-        item
-      end
+  defp quality_change(item = %{quality: quality}, :normal) when quality < 0 do
+    item
   end
+  defp quality_change(item = %{quality: quality, sell_in: sell}, :normal) when sell > 0 do
+    %{item | quality: quality - 1}
+  end
+  defp quality_change(item = %{quality: quality}, :normal) do
+    %{item | quality: quality - 2}
+  end
+
   defp quality_change(item, :legendary), do: item
 
-  defp quality_change(item, :reverse) do
-      if item.quality < 50 do
-        %{item | quality: item.quality + 1}
-      else
-        item
-      end
+  defp quality_change(item = %{quality: quality}, :reverse) when quality < 50 do
+    %{item | quality: quality + 1}
   end
-  defp quality_change(item, :special) do
-    item =
-      cond do
-        item.sell_in <= 0 -> %{item | quality: 0}
-        item.sell_in <= 5 -> %{item | quality: item.quality + 3}
-        item.sell_in <= 10 -> %{item | quality: item.quality + 2}
-        true -> %{item | quality: item.quality + 1}
-      end
-    if item.quality > 50 do
-      %{item | quality: 50}
-    else
-      item
-    end
+  defp quality_change(item,:reverse), do: item
+
+  defp quality_change(item = %{sell_in: sell}, :special) when sell <= 0 do
+    %{item | quality: 0}
   end
-  defp quality_change(item, :double) do
-      if item.quality > 0 do
-        if item.sell_in < 0 do
-          %{item | quality: item.quality - 4}
-        else
-          %{item | quality: item.quality - 2}
-        end
-      else
-        item
-      end
+  defp quality_change(item = %{quality: quality, sell_in: sell}, :special) when sell <= 5 do
+    %{item | quality: quality + 3} |> fifty?(quality)
   end
+  defp quality_change(item = %{quality: quality, sell_in: sell}, :special) when sell <= 10 do
+    %{item | quality: quality + 2} |> fifty?(quality)
+  end
+  defp quality_change(item = %{quality: quality}, :special) do
+    %{item | quality: quality + 1} |> fifty?(quality)
+  end
+
+  defp quality_change(item = %{quality: quality}, :double) when quality < 0 do
+    item
+  end
+  defp quality_change(item = %{quality: quality, sell_in: sell}, :double) when sell > 0 do
+    %{item | quality: quality - 2}
+  end
+  defp quality_change(item = %{quality: quality}, :double) do
+    %{item | quality: quality - 4}
+  end
+
+  defp fifty?(item, quality) when quality > 50 do
+    %{item | quality: 50}
+  end
+  defp fifty?(item,_quality), do: item
 
   # Update sell_in date
   defp update(agent, :item) do
@@ -145,8 +143,8 @@ defmodule GildedRose do
 
   defp update_sell_in([],_agent), do: []
 
-  defp update_sell_in([head | tail],agent) do
-    if head.name == Enum.find(items(agent,:cate),& &1.category == "legendary").name do
+  defp update_sell_in([item = %{name: name}|rest],agent) do
+    if name == Enum.find(items(agent,:cate),& &1.category == "legendary").name do
       List.flatten([head, update_sell_in(tail, agent)])
     else
       head = %{head | sell_in: head.sell_in - 1}
@@ -161,26 +159,23 @@ defmodule GildedRose do
 
   # Write updated data back to the text file.
   defp writeData(filename, agent) do
-    list = GildedRose.items(agent, :item)
-    File.write(filename, write(list))
+    list = items(agent, :item)
+    :ok = File.write(filename, write(list))
   end
 
-  defp write(list) when length(list) == 1 do
-    item = hd(list)
-    List.flatten([item.name, ",", to_string(item.sell_in), ",", to_string(item.quality)])
+  defp write([%{name: name, sell_in: sell, quality: quality}|[]]) do
+    [name, ",", to_string(sell), ",", to_string(quality)]
   end
 
-  defp write(list) do
-    item = hd(list)
-
+  defp write([%{name: name, sell_in: sell, quality: quality}|rest]) do
     List.flatten([
-      item.name,
+      name,
       ",",
-      to_string(item.sell_in),
+      to_string(sell),
       ",",
-      to_string(item.quality),
+      to_string(quality),
       "\n",
-      write(tl(list))
+      write(rest)
     ])
   end
 end
