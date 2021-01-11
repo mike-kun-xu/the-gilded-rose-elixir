@@ -27,51 +27,45 @@ defmodule GildedRose do
   end
 
   # Load data functionality.
-  defp loadItem([]), do: []
-  defp loadItem([item|rest]) do
-    item_to_load = String.split(item,"\,")
-    itemName = Enum.at(item_to_load, 0)
-    {itemSellIn, _} = Integer.parse(Enum.at(item_to_load, 1))
-    {itemQuality, _} = Integer.parse(Enum.at(item_to_load, 2))
-    List.flatten([Item.new(itemName, itemSellIn, itemQuality),loadItem(rest)])
+  defp loadItem(itemList) do
+    Enum.reduce(itemList, [], fn list, acc ->
+        [itemName,itemSellIn,itemQuality] = String.split(list,"\,")
+        [Item.new(itemName, String.to_integer(itemSellIn),String.to_integer(itemQuality))]
+        |> Enum.concat(acc)
+        end)
   end
 
-  defp loadCate([]), do: []
-  defp loadCate([item|rest]) do
-    item_to_load = String.split(item,"\,")
-    itemName = Enum.at(item_to_load, 0)
-    itemCate = Enum.at(item_to_load, 1)
-    List.flatten([Cate.new(itemName, itemCate),loadCate(rest)])
+  defp loadCate(itemList) do
+    Enum.reduce(itemList, [], fn list, acc ->
+        [itemName,itemCate] = String.split(list,"\,")
+        [Cate.new(itemName, itemCate)]
+        |> Enum.concat(acc)
+        end)
   end
 
-  defp loadDate([]), do: []
-  defp loadDate([item|rest]) do
-    item_to_load = String.split(item,"\,")
-    itemName = Enum.at(item_to_load, 0)
-    itemDate = Enum.at(item_to_load, 1)
-    List.flatten([Da.new(itemName, itemDate),loadDate(rest)])
+  defp loadDate(itemList) do
+    Enum.reduce(itemList, [], fn list, acc ->
+        [itemName,itemDate] = String.split(list,"\,")
+        [Da.new(itemName, itemDate)]
+        |> Enum.concat(acc)
+        end)
   end
 
   # Get all items or get items from different map.
   def items(agent), do: Agent.get(agent, & &1)
-  def items(agent, :item) do
-    Agent.get(agent, & &1.item)
-  end
-  def items(agent, :cate) do
-    Agent.get(agent, & &1.cate)
-  end
-  def items(agent, :date) do
-    Agent.get(agent, & &1.date)
-  end
+  def items(agent, :item), do: Agent.get(agent, & &1.item)
+  def items(agent, :cate), do: Agent.get(agent, & &1.cate)
+  def items(agent, :date), do: Agent.get(agent, & &1.date)
 
   # Update the quality and invoke the sell_in date and the data writing function.
   def update_quality(agent) do
     item_num = items(agent, :cate) |> length()
-    sell_list = update(agent, :item)
+    sell_list = update_sell_in(items(agent,:item),agent)
+
     :ok = Agent.update(agent, &Map.replace(&1, :item, sell_list))
     quality_list = update_quality(agent, item_num, [])
     :ok = Agent.update(agent, &Map.replace(&1, :item, quality_list))
-    date_list = update(agent, :date)
+    date_list = update_date(items(agent,:date),agent)
     :ok = Agent.update(agent, &Map.replace(&1, :date, date_list))
     :ok = writeData("priv/item.csv", agent)
   end
@@ -133,49 +127,39 @@ defmodule GildedRose do
   defp fifty?(item,_quality), do: item
 
   # Update sell_in date
-  defp update(agent, :item) do
-    update_sell_in(items(agent, :item),agent)
+
+  defp update_sell_in(itemList, agent) do
+    %{name: legendary} = Enum.find(items(agent,:cate), & &1.category == "legendary")
+    Enum.reduce(itemList,[],fn list, acc ->
+      %{name: name, sell_in: sell} = list
+      if name == legendary do
+        Enum.concat([list],acc)
+      else
+        list = %{list | sell_in: sell - 1}
+        Enum.concat([list],acc)
+      end
+    end)
   end
 
-  defp update(agent, :date) do
-    update_date(items(agent, :date))
-  end
-
-  defp update_sell_in([],_agent), do: []
-
-  defp update_sell_in([item = %{name: name}|rest],agent) do
-    if name == Enum.find(items(agent,:cate),& &1.category == "legendary").name do
-      List.flatten([head, update_sell_in(tail, agent)])
-    else
-      head = %{head | sell_in: head.sell_in - 1}
-      List.flatten([head, update_sell_in(tail, agent)])
-    end
-  end
-  defp update_date([]), do: []
-  defp update_date([head | tail]) do
-    head = %{head | date: to_string(Date.utc_today())}
-    List.flatten([head, update_date(tail)])
+  defp update_date(itemList, _agent) do
+    Enum.reduce(itemList,[],fn list,acc ->
+     list = %{list | date: to_string(Date.utc_today())}
+     Enum.concat([list],acc)
+    end)
   end
 
   # Write updated data back to the text file.
   defp writeData(filename, agent) do
     list = items(agent, :item)
-    :ok = File.write(filename, write(list))
+    :ok = File.write(filename, write(list,[]))
   end
 
-  defp write([%{name: name, sell_in: sell, quality: quality}|[]]) do
-    [name, ",", to_string(sell), ",", to_string(quality)]
+  defp write([%{name: name, sell_in: sell, quality: quality}|[]],result) do
+    Enum.concat([name, ",", to_string(sell), ",", to_string(quality)],result)
   end
 
-  defp write([%{name: name, sell_in: sell, quality: quality}|rest]) do
-    List.flatten([
-      name,
-      ",",
-      to_string(sell),
-      ",",
-      to_string(quality),
-      "\n",
-      write(rest)
-    ])
+  defp write([%{name: name, sell_in: sell, quality: quality}|rest],result) do
+    result = Enum.concat([name,",",to_string(sell),",",to_string(quality),"\n"],result)
+    write(rest,result)
   end
 end
